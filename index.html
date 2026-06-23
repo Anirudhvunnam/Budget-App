@@ -242,14 +242,14 @@ tr:hover td { background: #FAFAF8; }
 <div id="loading"><div class="spinner"></div></div>
 
 <!-- CONFIG BANNER (shown until Firebase is set up) -->
-<div id="config-banner">
+<div id="config-banner" style="display:none">
   ⚠ <strong>Firebase not connected yet.</strong>
   Paste your Firebase config below to enable login and sync.
   <a href="https://console.firebase.google.com/" target="_blank">Get config →</a>
 </div>
 
 <!-- SETUP SCREEN -->
-<div id="setup-screen">
+<div id="setup-screen" style="display:none">
   <div class="setup-card">
     <h1>Connect Firebase</h1>
     <p>One-time setup to enable login and real-time sync between you and your wife. Takes about 5 minutes.</p>
@@ -616,7 +616,7 @@ async function handleFile(file) {
   reader.onload = async e => {
     const rows = parseCSV(e.target.result);
     const tx = rows.map(r=>({
-      date: detectField(r,['date','transaction date','trans. date','posted date'])||'',
+      date: normaliseDate(detectField(r,['date','transaction date','trans. date','posted date'])||''),
       description: detectField(r,['description','merchant','payee','name'])||'',
       amount: Math.abs(parseFloat((detectField(r,['amount','charge amount','debit'])||'0').replace(/[$,]/g,''))||0),
     })).filter(t=>t.amount>0);
@@ -817,24 +817,56 @@ function renderTable() {
 // ─────────────────────────────────────────────────────
 function id(x){return document.getElementById(x)}
 function fmt(n){return'$'+n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g,',')}
-function fmtDate(d){if(!d)return'—';const dt=new Date(d+'T00:00:00');return isNaN(dt)?d:dt.toLocaleDateString('en-US',{month:'short',day:'numeric'});}
+
+// Normalise any common date string → 'YYYY-MM-DD' or '' if unparseable
+function normaliseDate(raw) {
+  if (!raw) return '';
+  const s = String(raw).trim();
+  // Already YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // YYYYMMDD
+  if (/^\d{8}$/.test(s)) return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
+  // MM/DD/YYYY or M/D/YYYY
+  const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mdy) return `${mdy[3]}-${mdy[1].padStart(2,'0')}-${mdy[2].padStart(2,'0')}`;
+  // DD/MM/YYYY (Citi UK style) — heuristic: if first number >12 it must be day
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmy && +dmy[1]>12) return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;
+  // MM-DD-YYYY
+  const mdy2 = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (mdy2) return `${mdy2[3]}-${mdy2[1].padStart(2,'0')}-${mdy2[2].padStart(2,'0')}`;
+  // Jan 15, 2024 or 15 Jan 2024
+  const dt = new Date(s);
+  if (!isNaN(dt)) return dt.toISOString().slice(0,10);
+  return '';
+}
+function fmtDate(d) {
+  const norm = normaliseDate(d);
+  if (!norm) return d||'—';
+  const dt = new Date(norm+'T00:00:00');
+  return isNaN(dt) ? norm : dt.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function showEl(elId,msg){const el=id(elId);el.style.display='block';el.textContent=msg;}
 let toastTimer;
 function toast(msg){const t=id('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),3000);}
 
 // ─────────────────────────────────────────────────────
-//  BOOT
+//  BOOT — config hardcoded, setup screen never shown
 // ─────────────────────────────────────────────────────
 (function boot() {
-  const cfg = getSavedConfig();
-  if (cfg && cfg.apiKey) {
-    id('config-banner').classList.add('hidden');
-    id('setup-screen').style.display = 'none';
-    initFirebase(cfg);
-  } else {
-    id('loading').classList.add('hidden');
-  }
+  const cfg = {
+    apiKey: "AIzaSyD8VzCjIQxSurdlTXXr4WZHPLp2VNunRgo",
+    authDomain: "family-budget-c6b57.firebaseapp.com",
+    projectId: "family-budget-c6b57",
+    storageBucket: "family-budget-c6b57.firebasestorage.app",
+    messagingSenderId: "354180155958",
+    appId: "1:354180155958:web:642f6b713a9c5345146697",
+    measurementId: "G-JP40948BNG"
+  };
+  id('config-banner').classList.add('hidden');
+  id('setup-screen').style.display = 'none';
+  initFirebase(cfg);
 })();
 </script>
 </body>
