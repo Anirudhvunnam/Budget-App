@@ -618,7 +618,7 @@ async function handleFile(file) {
     const tx = rows.map(r=>({
       date: normaliseDate(detectField(r,['date','transaction date','trans. date','posted date'])||''),
       description: detectField(r,['description','merchant','payee','name'])||'',
-      amount: Math.abs(parseFloat((detectField(r,['amount','charge amount','debit'])||'0').replace(/[$,]/g,''))||0),
+      amount: Math.abs(parseFloat((detectField(r,['amount','charge amount','debit','transaction amount'])||'0').replace(/[$,]/g,''))||0),
     })).filter(t=>t.amount>0);
     if(!tx.length) { toast('No transactions found in CSV'); return; }
     id('upload-status').textContent = `Uploading ${tx.length} transactions…`;
@@ -645,7 +645,16 @@ function splitCSV(line) {
   res.push(cur); return res;
 }
 function detectField(row,cands) {
-  for(const c of cands){ const k=Object.keys(row).find(k=>k.toLowerCase().includes(c)); if(k&&row[k])return row[k]; }
+  // First try exact match (case-insensitive)
+  for(const c of cands){
+    const k=Object.keys(row).find(k=>k.toLowerCase()===c.toLowerCase());
+    if(k&&row[k]) return row[k];
+  }
+  // Then try contains match
+  for(const c of cands){
+    const k=Object.keys(row).find(k=>k.toLowerCase().includes(c.toLowerCase()));
+    if(k&&row[k]) return row[k];
+  }
   return null;
 }
 
@@ -826,12 +835,12 @@ function normaliseDate(raw) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
   // YYYYMMDD
   if (/^\d{8}$/.test(s)) return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
-  // MM/DD/YYYY or M/D/YYYY
+  // MM/DD/YYYY or M/D/YYYY (Amex, most US banks)
   const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (mdy) return `${mdy[3]}-${mdy[1].padStart(2,'0')}-${mdy[2].padStart(2,'0')}`;
-  // DD/MM/YYYY (Citi UK style) — heuristic: if first number >12 it must be day
-  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (dmy && +dmy[1]>12) return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;
+  // M/D/YY two-digit year
+  const mdy3 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+  if (mdy3) return `20${mdy3[3]}-${mdy3[1].padStart(2,'0')}-${mdy3[2].padStart(2,'0')}`;
   // MM-DD-YYYY
   const mdy2 = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
   if (mdy2) return `${mdy2[3]}-${mdy2[1].padStart(2,'0')}-${mdy2[2].padStart(2,'0')}`;
