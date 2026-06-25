@@ -224,6 +224,17 @@ tr:hover td { background: #FAFAF8; }
 .empty-state { text-align: center; padding: 40px 20px; color: var(--muted); font-size: .82rem; }
 .empty-state .icon { font-size: 1.8rem; margin-bottom: 8px; }
 .tag-prog { font-size: .7rem; color: var(--muted); }
+.cb { width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent); }
+.missing-banner { background: var(--amber-light); border: 1px solid var(--amber); border-radius: var(--r); padding: 12px 16px; margin-bottom: 16px; display:none; align-items:center; gap:10px; flex-wrap:wrap; }
+.missing-banner.show { display:flex; }
+.missing-banner .mb-icon { font-size: 1.1rem; }
+.missing-banner .mb-text { flex:1; font-size:.82rem; color: var(--amber); font-weight:500; }
+.missing-banner .mb-sub { font-size:.75rem; color: var(--amber); font-weight:400; display:block; margin-top:2px; opacity:.85; }
+.missing-banner .mb-dismiss { padding:3px 10px; background:transparent; border:1px solid var(--amber); color:var(--amber); border-radius:5px; font-family:var(--font); font-size:.75rem; cursor:pointer; }
+.bulk-bar { display:none; align-items:center; gap:10px; padding:8px 16px; background:var(--accent-light); border-bottom:1px solid var(--border); font-size:.8rem; }
+.bulk-bar.show { display:flex; }
+.bulk-del { padding:4px 12px; background:var(--red); color:#fff; border:none; border-radius:5px; font-family:var(--font); font-size:.78rem; font-weight:500; cursor:pointer; }
+.bulk-cancel { padding:4px 10px; background:transparent; color:var(--muted); border:1px solid var(--border); border-radius:5px; font-family:var(--font); font-size:.78rem; cursor:pointer; }
 
 /* TOAST */
 #toast { position: fixed; bottom: 20px; right: 20px; background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: .8rem; z-index: 9999; opacity: 0; transform: translateY(8px); transition: all .25s; pointer-events: none; }
@@ -352,6 +363,16 @@ tr:hover td { background: #FAFAF8; }
       </div>
     </div>
 
+    <!-- MISSING MONTH BANNER -->
+    <div class="missing-banner" id="missingBanner">
+      <span class="mb-icon">📅</span>
+      <span class="mb-text" id="missingText">
+        Missing statement
+        <span class="mb-sub" id="missingSubText"></span>
+      </span>
+      <button class="mb-dismiss" onclick="dismissMissing()">Dismiss</button>
+    </div>
+
     <!-- SUMMARY CARDS -->
     <div class="summary-grid">
       <div class="s-card"><div class="s-label">Monthly Budget</div><div class="s-value" id="c-budget">$6,800</div><div class="s-sub">combined family</div></div>
@@ -391,6 +412,11 @@ tr:hover td { background: #FAFAF8; }
           <span class="tag-prog" id="tagProg"></span>
           <button onclick="clearAllTx()" style="padding:4px 10px;background:var(--red);color:#fff;border:none;border-radius:5px;font-family:var(--font);font-size:.74rem;font-weight:500;cursor:pointer;">🗑 Clear All</button>
         </div>
+      </div>
+      <div class="bulk-bar" id="bulkBar">
+        <span id="bulkCount">0 selected</span>
+        <button class="bulk-del" onclick="deleteSelected()">🗑 Delete selected</button>
+        <button class="bulk-cancel" onclick="clearSelection()">Cancel</button>
       </div>
       <div class="table-controls">
         <input type="text" id="srchInput" placeholder="Search…" oninput="renderTable()"/>
@@ -760,7 +786,56 @@ function populateWhoFilter(){
 // ─────────────────────────────────────────────────────
 //  REFRESH
 // ─────────────────────────────────────────────────────
-function refresh(){ renderSummary(); renderBuckets(); renderWho(); renderCharts(); renderTable(); }
+function refresh(){ renderSummary(); renderBuckets(); renderWho(); renderCharts(); renderTable(); checkMissingMonths(); }
+
+let missingDismissed = new Set();
+
+function checkMissingMonths() {
+  if (!allTx.length) return;
+
+  // Get all months we have data for
+  const presentMonths = new Set(allTx.map(t => t.date ? t.date.slice(0,7) : '').filter(Boolean));
+  if (!presentMonths.size) return;
+
+  // Find the earliest and latest month in our data
+  const sorted = [...presentMonths].sort();
+  const earliest = sorted[0];
+
+  // Build list of all months from earliest to current month
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  
+  const missing = [];
+  let cursor = new Date(earliest + '-01');
+  const end = new Date(currentMonth + '-01');
+  
+  while (cursor <= end) {
+    const key = `${cursor.getFullYear()}-${String(cursor.getMonth()+1).padStart(2,'0')}`;
+    if (!presentMonths.has(key) && !missingDismissed.has(key)) {
+      missing.push(key);
+    }
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  const banner = id('missingBanner');
+  if (!missing.length) { banner.classList.remove('show'); return; }
+
+  // Show the most recent missing month first
+  const toShow = missing[missing.length - 1];
+  const friendlyName = fmtMonth(toShow);
+  
+  id('missingText').innerHTML = `📋 <strong>${friendlyName} statement not uploaded yet</strong><span class="mb-sub" id="missingSubText">${missing.length > 1 ? `Also missing: ${missing.slice(0,-1).map(fmtMonth).join(', ')}` : 'Upload your CSV above to keep your budget up to date'}</span>`;
+  banner.classList.add('show');
+  banner.dataset.month = toShow;
+}
+
+function dismissMissing() {
+  const banner = id('missingBanner');
+  if (banner.dataset.month) missingDismissed.add(banner.dataset.month);
+  banner.classList.remove('show');
+  // Check if there are more missing months to show
+  checkMissingMonths();
+}
 
 function renderSummary() {
   const tx=visTx();
@@ -826,6 +901,8 @@ function renderCharts() {
     }
   });
 }
+let selectedIds = new Set();
+
 function renderTable() {
   const srch=id('srchInput').value.toLowerCase();
   const cF=id('fCat').value; const wF=id('fWho').value;
@@ -838,9 +915,14 @@ function renderTable() {
     el.innerHTML=`<div class="empty-state"><div class="icon">${allTx.length===0?'📂':'🔍'}</div>${allTx.length===0?'Upload a CSV to get started':'No transactions match'}</div>`;
     return;
   }
+  const allChecked = tx.length>0 && tx.every(t=>selectedIds.has(t.id));
   el.innerHTML=`<table>
-    <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Category</th><th>Spent On</th><th>Tagged by</th><th></th></tr></thead>
-    <tbody>${tx.map(t=>`<tr>
+    <thead><tr>
+      <th><input type="checkbox" class="cb" ${allChecked?'checked':''} onchange="toggleSelectAll(this, ${JSON.stringify(tx.map(t=>t.id))})" title="Select all"/></th>
+      <th>Date</th><th>Description</th><th>Amount</th><th>Category</th><th>Spent On</th><th>Tagged by</th><th></th>
+    </tr></thead>
+    <tbody>${tx.map(t=>`<tr style="${selectedIds.has(t.id)?'background:var(--accent-light)':''}">
+      <td><input type="checkbox" class="cb" ${selectedIds.has(t.id)?'checked':''} onchange="toggleSelect('${t.id}',this.checked)"/></td>
       <td class="mono" style="font-size:.73rem;white-space:nowrap">${fmtDate(t.date)}</td>
       <td>${esc(t.description)}</td>
       <td class="mono">${fmt(t.amount)}</td>
@@ -857,9 +939,39 @@ function renderTable() {
         </select>
       </td>
       <td class="tagger-by">${esc(t.taggedBy||t.uploadedBy||'')}</td>
-      <td><button class="del-btn" onclick="deleteTx('${t.id}')">✕</button></td>
+      <td><button class="del-btn" onclick="deleteTx('${t.id}')" title="Delete">✕</button></td>
     </tr>`).join('')}
     </tbody></table>`;
+  updateBulkBar();
+}
+
+function toggleSelect(id, checked) {
+  if(checked) selectedIds.add(id); else selectedIds.delete(id);
+  updateBulkBar(); renderTable();
+}
+function toggleSelectAll(cb, ids) {
+  if(cb.checked) ids.forEach(id=>selectedIds.add(id));
+  else ids.forEach(id=>selectedIds.delete(id));
+  updateBulkBar(); renderTable();
+}
+function updateBulkBar() {
+  const bar=id('bulkBar'); const n=selectedIds.size;
+  bar.classList.toggle('show', n>0);
+  id('bulkCount').textContent = n===1?'1 selected':`${n} selected`;
+}
+function clearSelection() { selectedIds.clear(); updateBulkBar(); renderTable(); }
+async function deleteSelected() {
+  if(!selectedIds.size) return;
+  if(!confirm(`Delete ${selectedIds.size} selected transaction${selectedIds.size>1?'s':''}? This cannot be undone.`)) return;
+  const ids=[...selectedIds];
+  const CHUNK=400;
+  for(let i=0;i<ids.length;i+=CHUNK){
+    const batch=db.batch();
+    ids.slice(i,i+CHUNK).forEach(id=>batch.delete(txCol().doc(id)));
+    await batch.commit();
+  }
+  selectedIds.clear();
+  toast(`Deleted ${ids.length} transaction${ids.length>1?'s':''} ✓`);
 }
 
 // ─────────────────────────────────────────────────────
