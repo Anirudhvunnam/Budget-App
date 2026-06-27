@@ -420,9 +420,9 @@ tr:hover td { background: #FAFAF8; }
       ondragover="event.preventDefault();this.classList.add('drag')"
       ondragleave="this.classList.remove('drag')"
       ondrop="handleDrop(event)">
-      <input type="file" id="csvInput" accept=".csv" onchange="handleFile(this.files[0])"/>
+      <input type="file" id="csvInput" accept=".csv" multiple onchange="handleFiles(this.files)"/>
       <strong>Upload Credit Card Statement</strong>
-      <p>Amex or Citi CSV · drag & drop or click</p>
+      <p>Amex or Citi CSV · drag & drop or click · select multiple files at once</p>
       <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;flex-wrap:wrap">
         <select id="cardLabel" style="border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-family:var(--font);font-size:.82rem;background:var(--bg)">
           <option value="Amex 1">Amex 1</option>
@@ -430,7 +430,7 @@ tr:hover td { background: #FAFAF8; }
           <option value="Citi">Citi</option>
           <option value="Other">Other</option>
         </select>
-        <button class="upload-btn" onclick="document.getElementById('csvInput').click()">Choose CSV</button>
+        <button class="upload-btn" onclick="document.getElementById('csvInput').click()">Choose CSV(s)</button>
       </div>
       <div id="upload-status" style="margin-top:8px"></div>
     </div>
@@ -713,22 +713,17 @@ async function saveTxTag(docId, field, val) {
 async function deleteTx(docId) {
   await txCol().doc(docId).delete();
 }
-async function uploadTxBatch(txArray) {
-  // Build a set of existing fingerprints to detect duplicates
+async function uploadTxBatch(txArray, fileResults=[], crossFileDupes=0) {
   const existing = new Set(allTx.map(t => `${t.date}|${t.description}|${t.amount}`));
-  const dupes = [];
-  const fresh = [];
+  const dupes = [], fresh = [];
   txArray.forEach(t => {
     const fp = `${t.date}|${t.description}|${t.amount}`;
-    if (existing.has(fp)) dupes.push(t);
-    else fresh.push(t);
+    if (existing.has(fp)) dupes.push(t); else fresh.push(t);
   });
   if (!fresh.length) {
-    toast(`All ${dupes.length} transactions already exist — nothing added`);
-    id('upload-status').textContent = `⚠ All ${dupes.length} already uploaded — no duplicates added`;
-    return;
+    const msg = `⚠ All transactions already uploaded — nothing added`;
+    toast(msg); id('upload-status').textContent = msg; return;
   }
-  // Upload in batches of 500 (Firestore limit)
   const CHUNK = 400;
   for (let i = 0; i < fresh.length; i += CHUNK) {
     const batch = db.batch();
@@ -737,21 +732,20 @@ async function uploadTxBatch(txArray) {
       const autocat = guessCategory(t.description);
       batch.set(ref, {
         date: t.date, description: t.description,
-        amount: t.amount,
-        card: t.card||'',
-        category: autocat,
-        who: 'us',
+        amount: t.amount, card: t.card||'',
+        category: autocat, who: 'us',
         uploadedBy: currentUser.displayName||currentUser.email,
         uploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
       });
     });
     await batch.commit();
   }
-  const msg = dupes.length > 0
-    ? `✓ ${fresh.length} added, ${dupes.length} duplicates skipped`
-    : `✓ ${fresh.length} transactions uploaded`;
-  id('upload-status').textContent = msg;
-  toast(msg);
+  const parts = [`✓ ${fresh.length} transaction${fresh.length!==1?'s':''} added`];
+  if (dupes.length) parts.push(`${dupes.length} already existed`);
+  if (crossFileDupes) parts.push(`${crossFileDupes} cross-file dupes skipped`);
+  if (fileResults.length > 1) parts.push(`from ${fileResults.length} files`);
+  const msg = parts.join(' · ');
+  id('upload-status').textContent = msg; toast(msg);
 }
 
 async function clearAllTx() {
