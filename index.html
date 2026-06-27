@@ -694,6 +694,42 @@ async function saveSettings() {
 }
 
 // ─────────────────────────────────────────────────────
+//  AUTO CATEGORIZATION
+// ─────────────────────────────────────────────────────
+const CAT_RULES = [
+  { key:'rent',      patterns:['rent','lease','apartment','hoa','housing'] },
+  { key:'car',       patterns:['geico','state farm','allstate','progressive','insurance','aaa ','jiffy lube','oil change','autozone','napa auto','pep boys','carwash','car wash','parking','epark','impark','honda','toyota','chevron','shell','arco','bp ','exxon','mobil','gas station','fuel','tesla','ev charging','electrify','blink charging'] },
+  { key:'utilities', patterns:['comcast','xfinity','t-mobile','verizon','at&t','sprint','puget sound energy','pse ','seattle city light','water bill','utility','internet','phone bill','cox ','spectrum','openai','chatgpt','claude','anthropic','github','google one','icloud','dropbox','adobe','microsoft 365','office 365'] },
+  { key:'groceries', patterns:['wholefds','whole foods','safeway','kroger','qfc','fred meyer','trader joe','costco','walmart','target','sprouts','hmart','h mart','99 ranch','winco','grocery','supermarket','albertsons'] },
+  { key:'shopping',  patterns:['amazon','amzn','ebay','etsy','nordstrom','macy','gap ','old navy','zara','h&m','uniqlo','tjmaxx','ross ','marshall','best buy','apple store','microsoft store','home depot','lowes','ikea','wayfair','chewy','petco','pet supplies'] },
+  { key:'vacation',  patterns:['hotel','marriott','hilton','hyatt','airbnb','vrbo','expedia','booking.com','kayak','delta','united','southwest','alaska air','american air','frontier','spirit air','cruise','resort','universal','disneyland','disney','six flags'] },
+  { key:'other',     patterns:['spa','salon','haircut','gym','fitness','planet fitness','ymca','netflix','spotify','hulu','disney+','amazon prime','apple','google play','charity','donation','church','medical','doctor','dentist','pharmacy','cvs','walgreens','rite aid','urgent care','hospital','insurance claim'] },
+];
+
+// Dining — map to shopping bucket if no dining bucket exists, else its own
+const DINING_PATTERNS = ['restaurant','chipotle','mcdonald','starbucks','coffee','doordash','ubereats','grubhub','instacart','pizza','sushi','ramen','taco','burger','subway ','panera','chick-fil','popeyes','wendys','kfc ','panda express','dine','bistro','grill','kitchen','eatery','bakery','bon appetit','cafe','deli','thai','chinese','indian','italian','mexican restaurant','steakhouse','seafood','bbq','brunch'];
+
+function guessCategory(desc) {
+  if (!desc) return '';
+  const d = desc.toLowerCase();
+  // Check dining first vs shopping
+  const isDining = DINING_PATTERNS.some(p => d.includes(p));
+  for (const rule of CAT_RULES) {
+    if (rule.patterns.some(p => d.includes(p))) {
+      // If dining pattern matches shopping, try to keep as shopping unless it's clearly food
+      return rule.key;
+    }
+  }
+  if (isDining) {
+    // Find shopping bucket and return it, or other
+    const shopBucket = BUCKETS.find(b => b.key === 'shopping');
+    return shopBucket ? 'shopping' : 'other';
+  }
+  return '';
+}
+
+
+// ─────────────────────────────────────────────────────
 //  FIRESTORE — TRANSACTIONS (real-time)
 // ─────────────────────────────────────────────────────
 function txCol() { return db.collection('transactions'); }
@@ -766,35 +802,80 @@ async function clearAllTx() {
 }
 
 // ─────────────────────────────────────────────────────
+//  PAYMENT DETECTION (defined early so CSV parser can use it)
+// ─────────────────────────────────────────────────────
+const PAYMENT_PATTERNS = [
+  'mobile payment','autopay','auto pay','payment thank you','thank you payment',
+  'online payment','bill payment','payment received','payment - thank','payment-thank',
+  'epayment','e-payment','direct payment','web payment','payment posting',
+  'automatic payment','minimum payment','statement credit',
+];
+function isPaymentTx(desc) {
+  if(!desc) return false;
+  const d = desc.toLowerCase();
+  return PAYMENT_PATTERNS.some(p => d.includes(p));
+}
+
+// ─────────────────────────────────────────────────────
 //  CSV PARSING
 // ─────────────────────────────────────────────────────
 function handleDrop(e) {
   e.preventDefault(); id('dropZone').classList.remove('drag');
-  const f = e.dataTransfer.files[0];
-  if(f&&f.name.endsWith('.csv')) handleFile(f);
+  const files = [...e.dataTransfer.files].filter(f=>f.name.endsWith('.csv'));
+  if(files.length) handleFiles(files);
 }
-async function handleFile(file) {
-  if(!file) return;
-  const reader = new FileReader();
-  reader.onload = async e => {
-    const rows = parseCSV(e.target.result);
-    const cardName = id('cardLabel').value || 'Unknown';
-    const tx = rows.map(r=>({
-      date: normaliseDate(detectField(r,['date','transaction date','trans. date','posted date'])||''),
-      description: detectField(r,['description','merchant','payee','name'])||'',
-      amount: parseFloat((detectField(r,['amount','charge amount','debit','transaction amount'])||'0').replace(/[$,]/g,''))||0,
-      card: cardName,
-    })).filter(t=>t.amount!==0 && !isPaymentTx(t.description));
-    if(!tx.length) { toast('No transactions found in CSV'); return; }
-    id('upload-status').textContent = `Uploading ${tx.length} transactions…`;
-    try {
-      await uploadTxBatch(tx);
-      id('upload-status').textContent = `✓ ${tx.length} transactions uploaded & synced`;
-      toast(`${tx.length} transactions added ✓`);
-    } catch(e) { id('upload-status').textContent = 'Upload error: '+e.message; }
-  };
-  reader.readAsText(file);
+
+async function handleFiles(fileList) {
+  const files = [...fileList].filter(f=>f.name.endsWith('.csv'));
+  if(!files.length) return;
+  const cardName = id('cardLabel').value || 'Unknown';
+  id('upload-status').textContent = `Reading ${files.length} file${files.length>1?'s':''}…`;
+
+  // Read all files in parallel
+  let allParsed = [];
+  const fileResults = [];
+  await Promise.all(files.map(file => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const rows = parseCSV(e.target.result);
+      const tx = rows.map(r=>({
+        date: normaliseDate(detectField(r,['date','transaction date','trans. date','posted date'])||''),
+        description: detectField(r,['description','merchant','payee','name'])||'',
+        amount: parseFloat((detectField(r,['amount','charge amount','debit','transaction amount'])||'0').replace(/[$,]/g,''))||0,
+        card: cardName,
+      })).filter(t => t.amount !== 0 && !isPaymentTx(t.description));
+      const skipped = rows.length - tx.length;
+      fileResults.push({ name: file.name, count: tx.length, skipped });
+      allParsed = [...allParsed, ...tx];
+      resolve();
+    };
+    reader.onerror = () => reject(new Error('Failed to read ' + file.name));
+    reader.readAsText(file);
+  })));
+
+  if(!allParsed.length) {
+    toast('No transactions found — all rows may be payments or empty');
+    id('upload-status').textContent = '⚠ No transactions found in selected file(s)';
+    return;
+  }
+
+  // Deduplicate across files themselves (overlapping statements)
+  const seen = new Set();
+  const deduped = allParsed.filter(t => {
+    const fp = `${t.date}|${t.description}|${t.amount}`;
+    if(seen.has(fp)) return false;
+    seen.add(fp); return true;
+  });
+  const crossFileDupes = allParsed.length - deduped.length;
+
+  id('upload-status').textContent = `Uploading ${deduped.length} transactions…`;
+  try {
+    await uploadTxBatch(deduped, fileResults, crossFileDupes);
+  } catch(err) {
+    id('upload-status').textContent = 'Upload error: ' + err.message;
+  }
 }
+
 function parseCSV(text) {
   const lines = text.trim().split('\n');
   const header = lines[0].split(',').map(h=>h.replace(/"/g,'').trim().toLowerCase());
@@ -810,12 +891,10 @@ function splitCSV(line) {
   res.push(cur); return res;
 }
 function detectField(row,cands) {
-  // First try exact match (case-insensitive)
   for(const c of cands){
     const k=Object.keys(row).find(k=>k.toLowerCase()===c.toLowerCase());
     if(k&&row[k]) return row[k];
   }
-  // Then try contains match
   for(const c of cands){
     const k=Object.keys(row).find(k=>k.toLowerCase().includes(c.toLowerCase()));
     if(k&&row[k]) return row[k];
@@ -1156,55 +1235,6 @@ async function saveManual() {
     errEl.textContent = 'Error saving: '+e.message;
     errEl.style.display = 'block';
   }
-}
-
-// ─────────────────────────────────────────────────────
-//  AUTO CATEGORIZATION
-// ─────────────────────────────────────────────────────
-// Patterns that indicate a payment/credit clearing — skip these entirely
-const PAYMENT_PATTERNS = [
-  'mobile payment','autopay','auto pay','payment thank you','thank you payment',
-  'online payment','bill payment','payment received','payment - thank','payment-thank',
-  'epayment','e-payment','direct payment','web payment','payment posting',
-  'automatic payment','minimum payment','statement credit',
-];
-
-function isPaymentTx(desc) {
-  if(!desc) return false;
-  const d = desc.toLowerCase();
-  return PAYMENT_PATTERNS.some(p => d.includes(p));
-}
-
-const CAT_RULES = [
-  { key:'rent',      patterns:['rent','lease','apartment','hoa','housing'] },
-  { key:'car',       patterns:['geico','state farm','allstate','progressive','insurance','aaa ','jiffy lube','oil change','autozone','napa auto','pep boys','carwash','car wash','parking','epark','impark','honda','toyota','chevron','shell','arco','bp ','exxon','mobil','gas station','fuel','tesla','ev charging','electrify','blink charging'] },
-  { key:'utilities', patterns:['comcast','xfinity','t-mobile','verizon','at&t','sprint','puget sound energy','pse ','seattle city light','water bill','utility','internet','phone bill','cox ','spectrum','openai','chatgpt','claude','anthropic','github','google one','icloud','dropbox','adobe','microsoft 365','office 365'] },
-  { key:'groceries', patterns:['wholefds','whole foods','safeway','kroger','qfc','fred meyer','trader joe','costco','walmart','target','sprouts','hmart','h mart','99 ranch','winco','grocery','supermarket','albertsons'] },
-  { key:'shopping',  patterns:['amazon','amzn','ebay','etsy','nordstrom','macy','gap ','old navy','zara','h&m','uniqlo','tjmaxx','ross ','marshall','best buy','apple store','microsoft store','home depot','lowes','ikea','wayfair','chewy','petco','pet supplies'] },
-  { key:'vacation',  patterns:['hotel','marriott','hilton','hyatt','airbnb','vrbo','expedia','booking.com','kayak','delta','united','southwest','alaska air','american air','frontier','spirit air','cruise','resort','universal','disneyland','disney','six flags'] },
-  { key:'other',     patterns:['spa','salon','haircut','gym','fitness','planet fitness','ymca','netflix','spotify','hulu','disney+','amazon prime','apple','google play','charity','donation','church','medical','doctor','dentist','pharmacy','cvs','walgreens','rite aid','urgent care','hospital','insurance claim'] },
-];
-
-// Dining — map to shopping bucket if no dining bucket exists, else its own
-const DINING_PATTERNS = ['restaurant','chipotle','mcdonald','starbucks','coffee','doordash','ubereats','grubhub','instacart','pizza','sushi','ramen','taco','burger','subway ','panera','chick-fil','popeyes','wendys','kfc ','panda express','dine','bistro','grill','kitchen','eatery','bakery','bon appetit','cafe','deli','thai','chinese','indian','italian','mexican restaurant','steakhouse','seafood','bbq','brunch'];
-
-function guessCategory(desc) {
-  if (!desc) return '';
-  const d = desc.toLowerCase();
-  // Check dining first vs shopping
-  const isDining = DINING_PATTERNS.some(p => d.includes(p));
-  for (const rule of CAT_RULES) {
-    if (rule.patterns.some(p => d.includes(p))) {
-      // If dining pattern matches shopping, try to keep as shopping unless it's clearly food
-      return rule.key;
-    }
-  }
-  if (isDining) {
-    // Find shopping bucket and return it, or other
-    const shopBucket = BUCKETS.find(b => b.key === 'shopping');
-    return shopBucket ? 'shopping' : 'other';
-  }
-  return '';
 }
 
 // ─────────────────────────────────────────────────────
