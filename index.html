@@ -240,6 +240,29 @@ tr:hover td { background: #FAFAF8; }
 #toast { position: fixed; bottom: 20px; right: 20px; background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: .8rem; z-index: 9999; opacity: 0; transform: translateY(8px); transition: all .25s; pointer-events: none; }
 #toast.show { opacity: 1; transform: translateY(0); }
 
+/* MANUAL ENTRY MODAL */
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:500; display:none; align-items:center; justify-content:center; padding:16px; }
+.modal-overlay.open { display:flex; }
+.modal { background:var(--surface); border-radius:var(--r-lg); box-shadow:0 8px 32px rgba(0,0,0,.18); width:100%; max-width:440px; overflow:hidden; }
+.modal-hdr { padding:16px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+.modal-hdr h2 { font-size:.95rem; font-weight:600; }
+.modal-close { background:none; border:none; font-size:1.2rem; cursor:pointer; color:var(--muted); padding:2px 6px; border-radius:4px; }
+.modal-close:hover { color:var(--ink); }
+.modal-body { padding:20px; display:flex; flex-direction:column; gap:12px; }
+.modal-field { display:flex; flex-direction:column; gap:4px; }
+.modal-field label { font-size:.72rem; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+.modal-field input, .modal-field select { border:1px solid var(--border); border-radius:7px; padding:8px 11px; font-family:var(--font); font-size:.85rem; background:var(--bg); color:var(--ink); width:100%; }
+.modal-field input:focus, .modal-field select:focus { outline:none; border-color:var(--accent); background:var(--surface); }
+.modal-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.modal-footer { padding:14px 20px; border-top:1px solid var(--border); display:flex; gap:8px; justify-content:flex-end; }
+.modal-save { padding:8px 20px; background:var(--accent); color:#fff; border:none; border-radius:7px; font-family:var(--font); font-size:.85rem; font-weight:500; cursor:pointer; }
+.modal-save:hover { opacity:.88; }
+.modal-cancel { padding:8px 14px; background:transparent; color:var(--muted); border:1px solid var(--border); border-radius:7px; font-family:var(--font); font-size:.85rem; cursor:pointer; }
+.type-toggle { display:flex; border:1px solid var(--border); border-radius:7px; overflow:hidden; }
+.type-toggle button { flex:1; padding:7px; font-family:var(--font); font-size:.82rem; font-weight:500; border:none; background:transparent; color:var(--muted); cursor:pointer; transition:all .15s; }
+.type-toggle button.active { background:var(--accent); color:#fff; }
+.type-toggle button.active.return { background:var(--accent2); }
+
 /* LOADING */
 #loading { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 9998; }
 #loading.hidden { display: none; }
@@ -400,8 +423,16 @@ tr:hover td { background: #FAFAF8; }
       <input type="file" id="csvInput" accept=".csv" onchange="handleFile(this.files[0])"/>
       <strong>Upload Credit Card Statement</strong>
       <p>Amex or Citi CSV · drag & drop or click</p>
-      <button class="upload-btn" onclick="document.getElementById('csvInput').click()">Choose CSV</button>
-      <div id="upload-status"></div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <select id="cardLabel" style="border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-family:var(--font);font-size:.82rem;background:var(--bg)">
+          <option value="Amex 1">Amex 1</option>
+          <option value="Amex 2">Amex 2</option>
+          <option value="Citi">Citi</option>
+          <option value="Other">Other</option>
+        </select>
+        <button class="upload-btn" onclick="document.getElementById('csvInput').click()">Choose CSV</button>
+      </div>
+      <div id="upload-status" style="margin-top:8px"></div>
     </div>
 
     <!-- TRANSACTIONS -->
@@ -410,6 +441,7 @@ tr:hover td { background: #FAFAF8; }
         Transactions
         <div style="display:flex;align-items:center;gap:10px">
           <span class="tag-prog" id="tagProg"></span>
+          <button onclick="openManual()" style="padding:4px 10px;background:var(--accent);color:#fff;border:none;border-radius:5px;font-family:var(--font);font-size:.74rem;font-weight:500;cursor:pointer;">+ Add</button>
           <button onclick="clearAllTx()" style="padding:4px 10px;background:var(--red);color:#fff;border:none;border-radius:5px;font-family:var(--font);font-size:.74rem;font-weight:500;cursor:pointer;">🗑 Clear All</button>
         </div>
       </div>
@@ -420,6 +452,7 @@ tr:hover td { background: #FAFAF8; }
       </div>
       <div class="table-controls">
         <input type="text" id="srchInput" placeholder="Search…" oninput="renderTable()"/>
+        <select id="fCard" onchange="renderTable()"><option value="">All cards</option></select>
         <select id="fCat" onchange="renderTable()"><option value="">All categories</option></select>
         <select id="fWho" onchange="renderTable()"><option value="">All — spent on</option></select>
       </div>
@@ -427,6 +460,69 @@ tr:hover td { background: #FAFAF8; }
     </div>
 
   </main>
+</div>
+
+<!-- MANUAL ENTRY MODAL -->
+<div class="modal-overlay" id="manualModal" onclick="if(event.target===this)closeManual()">
+  <div class="modal">
+    <div class="modal-hdr">
+      <h2>Add Transaction</h2>
+      <button class="modal-close" onclick="closeManual()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-field">
+        <label>Type</label>
+        <div class="type-toggle">
+          <button id="typeCharge" class="active" onclick="setTxType('charge')">💳 Charge / Expense</button>
+          <button id="typeReturn" onclick="setTxType('return')">↩ Return / Credit</button>
+        </div>
+      </div>
+      <div class="modal-row">
+        <div class="modal-field">
+          <label>Date</label>
+          <input type="date" id="m-date"/>
+        </div>
+        <div class="modal-field">
+          <label>Amount ($)</label>
+          <input type="number" id="m-amount" placeholder="0.00" min="0" step="0.01"/>
+        </div>
+      </div>
+      <div class="modal-field">
+        <label>Description</label>
+        <input type="text" id="m-desc" placeholder="e.g. Monthly Rent, Electricity Bill…"/>
+      </div>
+      <div class="modal-row">
+        <div class="modal-field">
+          <label>Card / Source</label>
+          <select id="m-card">
+            <option value="Bank Transfer">Bank Transfer</option>
+            <option value="Amex 1">Amex 1</option>
+            <option value="Amex 2">Amex 2</option>
+            <option value="Citi">Citi</option>
+            <option value="Cash">Cash</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div class="modal-field">
+          <label>Category</label>
+          <select id="m-cat">
+            <option value="">— select —</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-field">
+        <label>Spent On</label>
+        <select id="m-who">
+          <option value="us">Together / Family</option>
+        </select>
+      </div>
+      <div id="m-error" style="font-size:.78rem;color:var(--red);display:none"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-cancel" onclick="closeManual()">Cancel</button>
+      <button class="modal-save" onclick="saveManual()">Add Transaction</button>
+    </div>
+  </div>
 </div>
 
 <!-- TOAST -->
@@ -565,7 +661,7 @@ function showApp() {
   id('live-badge').style.display='inline-flex';
   subscribeSettings();
   subscribeTransactions();
-  populateCatFilter(); populateWhoFilter();
+  populateCatFilter(); populateWhoFilter(); populateCardFilter();
 }
 
 // ─────────────────────────────────────────────────────
@@ -638,9 +734,13 @@ async function uploadTxBatch(txArray) {
     const batch = db.batch();
     fresh.slice(i, i + CHUNK).forEach(t => {
       const ref = txCol().doc();
+      const autocat = guessCategory(t.description);
       batch.set(ref, {
         date: t.date, description: t.description,
-        amount: t.amount, category: '', who: '',
+        amount: t.amount,
+        card: t.card||'',
+        category: autocat,
+        who: 'us',
         uploadedBy: currentUser.displayName||currentUser.email,
         uploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
       });
@@ -682,11 +782,13 @@ async function handleFile(file) {
   const reader = new FileReader();
   reader.onload = async e => {
     const rows = parseCSV(e.target.result);
+    const cardName = id('cardLabel').value || 'Unknown';
     const tx = rows.map(r=>({
       date: normaliseDate(detectField(r,['date','transaction date','trans. date','posted date'])||''),
       description: detectField(r,['description','merchant','payee','name'])||'',
-      amount: Math.abs(parseFloat((detectField(r,['amount','charge amount','debit','transaction amount'])||'0').replace(/[$,]/g,''))||0),
-    })).filter(t=>t.amount>0);
+      amount: parseFloat((detectField(r,['amount','charge amount','debit','transaction amount'])||'0').replace(/[$,]/g,''))||0,
+      card: cardName,
+    })).filter(t=>t.amount!==0);
     if(!tx.length) { toast('No transactions found in CSV'); return; }
     id('upload-status').textContent = `Uploading ${tx.length} transactions…`;
     try {
@@ -778,6 +880,12 @@ function populateCatFilter(){
   id('fCat').innerHTML='<option value="">All categories</option>'+
     BUCKETS.map(b=>`<option value="${b.key}">${esc(b.label)}</option>`).join('');
 }
+function populateCardFilter(){
+  const cards=[...new Set(allTx.map(t=>t.card).filter(Boolean))].sort();
+  const sel=id('fCard');
+  if(!sel) return;
+  sel.innerHTML='<option value="">All cards</option>'+cards.map(c=>`<option value="${c}">${esc(c)}</option>`).join('');
+}
 function populateWhoFilter(){
   id('fWho').innerHTML='<option value="">All — spent on</option>'+
     WHO_OPTS.map(w=>`<option value="${w.value}">${esc(w.label)}</option>`).join('');
@@ -839,14 +947,18 @@ function dismissMissing() {
 
 function renderSummary() {
   const tx=visTx();
-  const spent=tx.reduce((s,t)=>s+t.amount,0);
-  const rem=BUDGET-spent;
+  const charges=tx.filter(t=>t.amount>0);
+  const returns=tx.filter(t=>t.amount<0);
+  const spent=charges.reduce((s,t)=>s+t.amount,0);
+  const returned=returns.reduce((s,t)=>s+Math.abs(t.amount),0);
+  const net=spent-returned;
+  const rem=BUDGET-net;
   const untagged=tx.filter(t=>!t.category).length;
   id('c-budget').textContent=fmt(BUDGET);
-  id('c-spent').textContent=fmt(spent);
+  id('c-spent').textContent=fmt(net);
   id('c-remaining').textContent=fmt(Math.max(0,rem));
   id('c-remaining').className='s-value '+(rem<0?'red':'green');
-  id('c-txcount').textContent=tx.length+' transactions';
+  id('c-txcount').textContent=`${charges.length} charges${returned>0?' · '+fmt(returned)+' returned':''}`;
   id('c-untagged').textContent=untagged;
   const tagged=tx.length-untagged;
   id('tagProg').textContent=tx.length>0?`${tagged}/${tx.length} tagged`:'';
@@ -854,7 +966,8 @@ function renderSummary() {
 function renderBuckets() {
   const tx=visTx();
   id('bucketList').innerHTML=BUCKETS.map(b=>{
-    const spent=tx.filter(t=>t.category===b.key).reduce((s,t)=>s+t.amount,0);
+    const btx=tx.filter(t=>t.category===b.key);
+    const spent=btx.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0) - btx.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
     const pct=Math.min(100,(spent/(b.budget||1))*100);
     const barColor=pct>=100?'var(--red)':pct>=80?'var(--amber)':b.color;
     return `<div>
@@ -865,7 +978,7 @@ function renderBuckets() {
 }
 function renderWho() {
   const tx=visTx();
-  const sum=v=>tx.filter(t=>t.who===v).reduce((s,t)=>s+t.amount,0);
+  const sum=v=>{const wtx=tx.filter(t=>t.who===v);return wtx.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)-wtx.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);};
   id('whoGrid').innerHTML=WHO_OPTS.map(w=>`
     <div class="who-card">
       <div class="who-name">${esc(w.label)}</div>
@@ -874,7 +987,7 @@ function renderWho() {
 }
 function renderCharts() {
   const tx=visTx();
-  const bData=BUCKETS.map(b=>tx.filter(t=>t.category===b.key).reduce((s,t)=>s+t.amount,0));
+  const bData=BUCKETS.map(b=>{const btx=tx.filter(t=>t.category===b.key);return Math.max(0,btx.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)-btx.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0));});
   if(bChart)bChart.destroy();
   bChart=new Chart(id('bucketChart').getContext('2d'),{
     type:'doughnut',
@@ -882,7 +995,7 @@ function renderCharts() {
     options:{plugins:{legend:{position:'right',labels:{font:{family:'DM Sans',size:10},boxWidth:10}}},cutout:'60%'}
   });
   const byDate={};
-  tx.forEach(t=>{if(!t.date)return;const d=t.date.slice(0,10);byDate[d]=(byDate[d]||0)+t.amount;});
+  tx.forEach(t=>{if(!t.date)return;const d=t.date.slice(0,10);byDate[d]=(byDate[d]||0)+t.amount;}); // negatives reduce spend
   const dates=Object.keys(byDate).sort();
   let run=0; const cum=dates.map(d=>{run+=byDate[d];return run;});
   if(tChart)tChart.destroy();
@@ -906,8 +1019,10 @@ let selectedIds = new Set();
 function renderTable() {
   const srch=id('srchInput').value.toLowerCase();
   const cF=id('fCat').value; const wF=id('fWho').value;
+  const cardF=id('fCard').value;
   const tx=visTx().filter(t=>
     (!srch||t.description.toLowerCase().includes(srch))&&
+    (!cardF||t.card===cardF)&&
     (!cF||t.category===cF)&&(!wF||t.who===wF)
   );
   const el=id('tableBody');
@@ -919,13 +1034,17 @@ function renderTable() {
   el.innerHTML=`<table>
     <thead><tr>
       <th><input type="checkbox" class="cb" ${allChecked?'checked':''} onchange="toggleSelectAll(this, ${JSON.stringify(tx.map(t=>t.id))})" title="Select all"/></th>
-      <th>Date</th><th>Description</th><th>Amount</th><th>Category</th><th>Spent On</th><th>Tagged by</th><th></th>
+      <th>Date</th><th>Description</th><th>Card</th><th>Amount</th><th>Category</th><th>Spent On</th><th>Tagged by</th><th></th>
     </tr></thead>
     <tbody>${tx.map(t=>`<tr style="${selectedIds.has(t.id)?'background:var(--accent-light)':''}">
       <td><input type="checkbox" class="cb" ${selectedIds.has(t.id)?'checked':''} onchange="toggleSelect('${t.id}',this.checked)"/></td>
       <td class="mono" style="font-size:.73rem;white-space:nowrap">${fmtDate(t.date)}</td>
       <td>${esc(t.description)}</td>
-      <td class="mono">${fmt(t.amount)}</td>
+      <td style="font-size:.72rem;white-space:nowrap">
+        <span style="background:var(--accent-light);color:var(--accent);padding:2px 7px;border-radius:99px;font-size:.68rem;font-weight:500">${esc(t.card||'—')}</span>
+        ${t.manual?'<span style="background:var(--green-light);color:var(--accent2);padding:2px 5px;border-radius:99px;font-size:.62rem;font-weight:500;margin-left:3px">manual</span>':''}
+      </td>
+      <td class="mono" style="${t.amount<0?'color:var(--accent2);font-weight:500':''}">${t.amount<0?'↩ '+fmt(Math.abs(t.amount)):fmt(t.amount)}</td>
       <td>
         <select class="tagger" onchange="saveTxTag('${t.id}','category',this.value)">
           <option value="">— category —</option>
@@ -972,6 +1091,110 @@ async function deleteSelected() {
   }
   selectedIds.clear();
   toast(`Deleted ${ids.length} transaction${ids.length>1?'s':''} ✓`);
+}
+
+// ─────────────────────────────────────────────────────
+//  MANUAL ENTRY
+// ─────────────────────────────────────────────────────
+let manualTxType = 'charge';
+
+function openManual() {
+  // Set today's date
+  const today = new Date().toISOString().slice(0,10);
+  id('m-date').value = today;
+  id('m-amount').value = '';
+  id('m-desc').value = '';
+  id('m-card').value = 'Bank Transfer';
+  id('m-error').style.display = 'none';
+  setTxType('charge');
+  // Populate category and who dropdowns from current state
+  id('m-cat').innerHTML = '<option value="">— select —</option>' +
+    BUCKETS.map(b=>`<option value="${b.key}">${esc(b.label)}</option>`).join('');
+  id('m-who').innerHTML = WHO_OPTS.map(w=>`<option value="${w.value}"${w.value==='us'?' selected':''}>${esc(w.label)}</option>`).join('');
+  id('manualModal').classList.add('open');
+  setTimeout(()=>id('m-desc').focus(), 100);
+}
+
+function closeManual() {
+  id('manualModal').classList.remove('open');
+}
+
+function setTxType(type) {
+  manualTxType = type;
+  id('typeCharge').className = type==='charge' ? 'active' : '';
+  id('typeReturn').className = type==='return' ? 'active return' : '';
+}
+
+async function saveManual() {
+  const date = id('m-date').value;
+  const amount = parseFloat(id('m-amount').value);
+  const desc = id('m-desc').value.trim();
+  const card = id('m-card').value;
+  const category = id('m-cat').value;
+  const who = id('m-who').value;
+  const errEl = id('m-error');
+
+  if (!date) { errEl.textContent='Please enter a date'; errEl.style.display='block'; return; }
+  if (!amount || amount <= 0) { errEl.textContent='Please enter a valid amount'; errEl.style.display='block'; return; }
+  if (!desc) { errEl.textContent='Please enter a description'; errEl.style.display='block'; return; }
+  errEl.style.display = 'none';
+
+  const finalAmount = manualTxType === 'return' ? -Math.abs(amount) : Math.abs(amount);
+  const normDate = normaliseDate(date);
+
+  try {
+    await txCol().doc().set({
+      date: normDate,
+      description: desc,
+      amount: finalAmount,
+      card: card,
+      category: category,
+      who: who,
+      manual: true,
+      uploadedBy: currentUser.displayName||currentUser.email,
+      uploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    closeManual();
+    toast(`Transaction added ✓`);
+  } catch(e) {
+    errEl.textContent = 'Error saving: '+e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+// ─────────────────────────────────────────────────────
+//  AUTO CATEGORIZATION
+// ─────────────────────────────────────────────────────
+const CAT_RULES = [
+  { key:'rent',      patterns:['rent','lease','apartment','hoa','housing'] },
+  { key:'car',       patterns:['geico','state farm','allstate','progressive','insurance','aaa ','jiffy lube','oil change','autozone','napa auto','pep boys','carwash','car wash','parking','epark','impark','honda','toyota','chevron','shell','arco','bp ','exxon','mobil','gas station','fuel','tesla','ev charging','electrify','blink charging'] },
+  { key:'utilities', patterns:['comcast','xfinity','t-mobile','verizon','at&t','sprint','puget sound energy','pse ','seattle city light','water bill','utility','internet','phone bill','cox ','spectrum'] },
+  { key:'groceries', patterns:['wholefds','whole foods','safeway','kroger','qfc','fred meyer','trader joe','costco','walmart','target','sprouts','hmart','h mart','99 ranch','winco','grocery','supermarket','albertsons'] },
+  { key:'shopping',  patterns:['amazon','amzn','ebay','etsy','nordstrom','macy','gap ','old navy','zara','h&m','uniqlo','tjmaxx','ross ','marshall','best buy','apple store','microsoft store','home depot','lowes','ikea','wayfair','chewy','petco','pet supplies'] },
+  { key:'vacation',  patterns:['hotel','marriott','hilton','hyatt','airbnb','vrbo','expedia','booking.com','kayak','delta','united','southwest','alaska air','american air','frontier','spirit air','cruise','resort','universal','disneyland','disney','six flags'] },
+  { key:'other',     patterns:['spa','salon','haircut','gym','fitness','planet fitness','ymca','netflix','spotify','hulu','disney+','amazon prime','apple','google play','charity','donation','church','medical','doctor','dentist','pharmacy','cvs','walgreens','rite aid','urgent care','hospital','insurance claim'] },
+];
+
+// Dining — map to shopping bucket if no dining bucket exists, else its own
+const DINING_PATTERNS = ['restaurant','chipotle','mcdonald','starbucks','coffee','doordash','ubereats','grubhub','instacart','pizza','sushi','ramen','taco','burger','subway ','panera','chick-fil','popeyes','wendys','kfc ','panda express','dine','bistro','grill','kitchen','eatery','bakery','bon appetit','cafe','deli','thai','chinese','indian','italian','mexican restaurant','steakhouse','seafood','bbq','brunch'];
+
+function guessCategory(desc) {
+  if (!desc) return '';
+  const d = desc.toLowerCase();
+  // Check dining first vs shopping
+  const isDining = DINING_PATTERNS.some(p => d.includes(p));
+  for (const rule of CAT_RULES) {
+    if (rule.patterns.some(p => d.includes(p))) {
+      // If dining pattern matches shopping, try to keep as shopping unless it's clearly food
+      return rule.key;
+    }
+  }
+  if (isDining) {
+    // Find shopping bucket and return it, or other
+    const shopBucket = BUCKETS.find(b => b.key === 'shopping');
+    return shopBucket ? 'shopping' : 'other';
+  }
+  return '';
 }
 
 // ─────────────────────────────────────────────────────
