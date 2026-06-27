@@ -740,9 +740,11 @@ async function uploadTxBatch(txArray, fileResults=[], crossFileDupes=0) {
     });
     await batch.commit();
   }
+  const totalSkippedPayments = fileResults.reduce((s,f)=>s+(f.skipped||0),0);
   const parts = [`✓ ${fresh.length} transaction${fresh.length!==1?'s':''} added`];
   if (dupes.length) parts.push(`${dupes.length} already existed`);
   if (crossFileDupes) parts.push(`${crossFileDupes} cross-file dupes skipped`);
+  if (totalSkippedPayments) parts.push(`${totalSkippedPayments} payment${totalSkippedPayments!==1?'s':''} ignored`);
   if (fileResults.length > 1) parts.push(`from ${fileResults.length} files`);
   const msg = parts.join(' · ');
   id('upload-status').textContent = msg; toast(msg);
@@ -782,7 +784,7 @@ async function handleFile(file) {
       description: detectField(r,['description','merchant','payee','name'])||'',
       amount: parseFloat((detectField(r,['amount','charge amount','debit','transaction amount'])||'0').replace(/[$,]/g,''))||0,
       card: cardName,
-    })).filter(t=>t.amount!==0);
+    })).filter(t=>t.amount!==0 && !isPaymentTx(t.description));
     if(!tx.length) { toast('No transactions found in CSV'); return; }
     id('upload-status').textContent = `Uploading ${tx.length} transactions…`;
     try {
@@ -1159,10 +1161,24 @@ async function saveManual() {
 // ─────────────────────────────────────────────────────
 //  AUTO CATEGORIZATION
 // ─────────────────────────────────────────────────────
+// Patterns that indicate a payment/credit clearing — skip these entirely
+const PAYMENT_PATTERNS = [
+  'mobile payment','autopay','auto pay','payment thank you','thank you payment',
+  'online payment','bill payment','payment received','payment - thank','payment-thank',
+  'epayment','e-payment','direct payment','web payment','payment posting',
+  'automatic payment','minimum payment','statement credit',
+];
+
+function isPaymentTx(desc) {
+  if(!desc) return false;
+  const d = desc.toLowerCase();
+  return PAYMENT_PATTERNS.some(p => d.includes(p));
+}
+
 const CAT_RULES = [
   { key:'rent',      patterns:['rent','lease','apartment','hoa','housing'] },
   { key:'car',       patterns:['geico','state farm','allstate','progressive','insurance','aaa ','jiffy lube','oil change','autozone','napa auto','pep boys','carwash','car wash','parking','epark','impark','honda','toyota','chevron','shell','arco','bp ','exxon','mobil','gas station','fuel','tesla','ev charging','electrify','blink charging'] },
-  { key:'utilities', patterns:['comcast','xfinity','t-mobile','verizon','at&t','sprint','puget sound energy','pse ','seattle city light','water bill','utility','internet','phone bill','cox ','spectrum'] },
+  { key:'utilities', patterns:['comcast','xfinity','t-mobile','verizon','at&t','sprint','puget sound energy','pse ','seattle city light','water bill','utility','internet','phone bill','cox ','spectrum','openai','chatgpt','claude','anthropic','github','google one','icloud','dropbox','adobe','microsoft 365','office 365'] },
   { key:'groceries', patterns:['wholefds','whole foods','safeway','kroger','qfc','fred meyer','trader joe','costco','walmart','target','sprouts','hmart','h mart','99 ranch','winco','grocery','supermarket','albertsons'] },
   { key:'shopping',  patterns:['amazon','amzn','ebay','etsy','nordstrom','macy','gap ','old navy','zara','h&m','uniqlo','tjmaxx','ross ','marshall','best buy','apple store','microsoft store','home depot','lowes','ikea','wayfair','chewy','petco','pet supplies'] },
   { key:'vacation',  patterns:['hotel','marriott','hilton','hyatt','airbnb','vrbo','expedia','booking.com','kayak','delta','united','southwest','alaska air','american air','frontier','spirit air','cruise','resort','universal','disneyland','disney','six flags'] },
