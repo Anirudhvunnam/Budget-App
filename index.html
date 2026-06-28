@@ -847,7 +847,7 @@ async function handleFiles(fileList) {
       const tx = rows.map(r => ({
         date: normaliseDate(detectField(r, ['date','transaction date','trans. date','posted date']) || ''),
         description: detectField(r, ['description','merchant','payee','name']) || '',
-        amount: parseFloat((detectField(r, ['amount','charge amount','debit','transaction amount']) || '0').replace(/[$,]/g,'')) || 0,
+        amount: parseCsvAmount(r),
         card: cardName,
       })).filter(t => t.amount !== 0 && !isPaymentTx(t.description));
 
@@ -878,6 +878,33 @@ async function handleFiles(fileList) {
     id('upload-status').textContent = '❌ Error: ' + err.message;
     toast('Upload failed: ' + err.message);
   }
+}
+
+// Smart amount parser — handles Amex (single Amount col) and Citi (Debit/Credit cols)
+function parseCsvAmount(row) {
+  const keys = Object.keys(row).map(k => k.toLowerCase().trim());
+
+  // Citi format: separate Debit and Credit columns
+  const hasDebit  = keys.some(k => k === 'debit');
+  const hasCredit = keys.some(k => k === 'credit');
+  if (hasDebit && hasCredit) {
+    const debitKey  = Object.keys(row).find(k => k.toLowerCase().trim() === 'debit');
+    const creditKey = Object.keys(row).find(k => k.toLowerCase().trim() === 'credit');
+    const debit  = parseFloat((row[debitKey]  || '').replace(/[$,]/g, '')) || 0;
+    const credit = parseFloat((row[creditKey] || '').replace(/[$,]/g, '')) || 0;
+    // Debit = money spent (positive), Credit = return/payment (negative)
+    if (debit  > 0) return  debit;
+    if (credit > 0) return -credit;
+    return 0;
+  }
+
+  // Amex / generic: single amount column (may be negative for returns)
+  const amountKey = Object.keys(row).find(k =>
+    ['amount','charge amount','transaction amount'].includes(k.toLowerCase().trim())
+  );
+  if (amountKey) return parseFloat((row[amountKey] || '0').replace(/[$,]/g, '')) || 0;
+
+  return 0;
 }
 
 function parseCSV(text) {
