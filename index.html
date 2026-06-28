@@ -420,7 +420,7 @@ tr:hover td { background: #FAFAF8; }
       ondragover="event.preventDefault();this.classList.add('drag')"
       ondragleave="this.classList.remove('drag')"
       ondrop="handleDrop(event)">
-      <input type="file" id="csvInput" accept=".csv" multiple onchange="handleFiles(this.files)"/>
+      <input type="file" id="csvInput" accept=".csv,.CSV" multiple onchange="handleFiles(this.files)"/>
       <strong>Upload Credit Card Statement</strong>
       <p>Amex or Citi CSV · drag & drop or click · select multiple files at once</p>
       <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;flex-wrap:wrap">
@@ -819,12 +819,12 @@ function isPaymentTx(desc) {
 // ─────────────────────────────────────────────────────
 function handleDrop(e) {
   e.preventDefault(); id('dropZone').classList.remove('drag');
-  const files = [...e.dataTransfer.files].filter(f=>f.name.endsWith('.csv'));
+  const files = [...e.dataTransfer.files].filter(f=>f.name.toLowerCase().endsWith('.csv'));
   if(files.length) handleFiles(files);
 }
 
 async function handleFiles(fileList) {
-  const files = [...fileList].filter(f=>f.name.endsWith('.csv'));
+  const files = [...fileList].filter(f=>f.name.toLowerCase().endsWith('.csv'));
   if(!files.length) return;
   const cardName = id('cardLabel').value || 'Unknown';
   id('upload-status').textContent = `Reading ${files.length} file${files.length>1?'s':''}…`;
