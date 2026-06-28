@@ -1254,7 +1254,15 @@ function openManual() {
   // Populate category and who dropdowns from current state
   id('m-cat').innerHTML = '<option value="">— select —</option>' +
     BUCKETS.map(b=>`<option value="${b.key}">${esc(b.label)}</option>`).join('');
-  id('m-who').innerHTML = WHO_OPTS.map(w=>`<option value="${w.value}"${w.value==='us'?' selected':''}>${esc(w.label)}</option>`).join('');
+  const whoOpts = WHO_OPTS.length ? WHO_OPTS : [
+    {value:'me-self', label:'Me → Myself'},
+    {value:'me-wife', label:'Me → Wife ❤️'},
+    {value:'wife-self', label:'Wife → Herself'},
+    {value:'wife-me', label:'Wife → Me'},
+    {value:'us', label:'Together / Family'},
+    {value:'friends', label:'Me → Friends / Gifts'},
+  ];
+  id('m-who').innerHTML = whoOpts.map(w=>`<option value="${w.value}"${w.value==='us'?' selected':''}>${esc(w.label)}</option>`).join('');
   id('manualModal').classList.add('open');
   setTimeout(()=>id('m-desc').focus(), 100);
 }
@@ -1275,7 +1283,7 @@ async function saveManual() {
   const desc = id('m-desc').value.trim();
   const card = id('m-card').value;
   const category = id('m-cat').value;
-  const who = id('m-who').value;
+  const who = id('m-who').value || 'us';
   const errEl = id('m-error');
 
   if (!date) { errEl.textContent='Please enter a date'; errEl.style.display='block'; return; }
@@ -1286,18 +1294,21 @@ async function saveManual() {
   const finalAmount = manualTxType === 'return' ? -Math.abs(amount) : Math.abs(amount);
   const normDate = normaliseDate(date);
 
+  // Build clean object — no undefined values allowed by Firestore
+  const txData = {
+    date: normDate || date,
+    description: desc,
+    amount: finalAmount,
+    card: card || 'Bank Transfer',
+    category: category || '',
+    who: who || 'us',
+    manual: true,
+    uploadedBy: currentUser.displayName || currentUser.email || 'unknown',
+    uploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
+  };
+
   try {
-    await txCol().doc().set({
-      date: normDate,
-      description: desc,
-      amount: finalAmount,
-      card: card,
-      category: category,
-      who: who,
-      manual: true,
-      uploadedBy: currentUser.displayName||currentUser.email,
-      uploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
-    });
+    await txCol().doc().set(txData);
     closeManual();
     toast(`Transaction added ✓`);
   } catch(e) {
