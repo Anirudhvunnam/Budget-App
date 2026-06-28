@@ -451,10 +451,22 @@ tr:hover td { background: #FAFAF8; }
         <button class="bulk-cancel" onclick="clearSelection()">Cancel</button>
       </div>
       <div class="table-controls">
-        <input type="text" id="srchInput" placeholder="Search…" oninput="renderTable()"/>
+        <input type="text" id="srchInput" placeholder="Search description…" oninput="renderTable()" style="flex:2;min-width:160px"/>
         <select id="fCard" onchange="renderTable()"><option value="">All cards</option></select>
         <select id="fCat" onchange="renderTable()"><option value="">All categories</option></select>
         <select id="fWho" onchange="renderTable()"><option value="">All — spent on</option></select>
+        <select id="fTagged" onchange="renderTable()">
+          <option value="">All — tagged by</option>
+        </select>
+        <select id="fAmt" onchange="renderTable()">
+          <option value="">All amounts</option>
+          <option value="under25">Under $25</option>
+          <option value="25to100">$25 – $100</option>
+          <option value="100to500">$100 – $500</option>
+          <option value="over500">Over $500</option>
+          <option value="returns">Returns only ↩</option>
+        </select>
+        <button onclick="clearAllFilters()" style="padding:5px 10px;background:transparent;border:1px solid var(--border);border-radius:6px;font-family:var(--font);font-size:.78rem;color:var(--muted);cursor:pointer;white-space:nowrap">✕ Clear</button>
       </div>
       <div id="tableBody"><div class="empty-state"><div class="icon">📂</div>Upload a CSV to get started</div></div>
     </div>
@@ -737,7 +749,7 @@ function subscribeTransactions() {
   if(unsubscribeTx) unsubscribeTx();
   unsubscribeTx = txCol().orderBy('date','asc').onSnapshot(snap => {
     allTx = snap.docs.map(d=>({id:d.id, ...d.data()}));
-    populateMonthFilter(); refresh();
+    populateMonthFilter(); populateCardFilter(); refresh();
   }, err => { console.error(err); });
 }
 async function saveTxTag(docId, field, val) {
@@ -991,6 +1003,19 @@ function populateCardFilter(){
   const sel=id('fCard');
   if(!sel) return;
   sel.innerHTML='<option value="">All cards</option>'+cards.map(c=>`<option value="${c}">${esc(c)}</option>`).join('');
+  // Also populate tagged-by filter
+  const taggers=[...new Set(allTx.map(t=>t.taggedBy||t.uploadedBy||'').filter(Boolean))].sort();
+  const tsel=id('fTagged');
+  if(tsel) tsel.innerHTML='<option value="">All — tagged by</option>'+taggers.map(t=>`<option value="${t}">${esc(t)}</option>`).join('');
+}
+function clearAllFilters(){
+  id('srchInput').value='';
+  id('fCard').value='';
+  id('fCat').value='';
+  id('fWho').value='';
+  if(id('fTagged')) id('fTagged').value='';
+  if(id('fAmt')) id('fAmt').value='';
+  renderTable();
 }
 function populateWhoFilter(){
   id('fWho').innerHTML='<option value="">All — spent on</option>'+
@@ -1125,12 +1150,25 @@ let selectedIds = new Set();
 function renderTable() {
   const srch=id('srchInput').value.toLowerCase();
   const cF=id('fCat').value; const wF=id('fWho').value;
-  const cardF=id('fCard').value;
-  const tx=visTx().filter(t=>
-    (!srch||t.description.toLowerCase().includes(srch))&&
-    (!cardF||t.card===cardF)&&
-    (!cF||t.category===cF)&&(!wF||t.who===wF)
-  );
+  const cardF = id('fCard').value;
+  const taggedF = id('fTagged') ? id('fTagged').value : '';
+  const amtF = id('fAmt') ? id('fAmt').value : '';
+  const tx = visTx().filter(t => {
+    if (srch && !t.description.toLowerCase().includes(srch)) return false;
+    if (cardF && t.card !== cardF) return false;
+    if (cF && t.category !== cF) return false;
+    if (wF && t.who !== wF) return false;
+    if (taggedF && (t.taggedBy||t.uploadedBy||'') !== taggedF) return false;
+    if (amtF) {
+      const a = Math.abs(t.amount);
+      if (amtF === 'under25'   && !(a < 25))          return false;
+      if (amtF === '25to100'   && !(a >= 25 && a < 100))  return false;
+      if (amtF === '100to500'  && !(a >= 100 && a < 500)) return false;
+      if (amtF === 'over500'   && !(a >= 500))         return false;
+      if (amtF === 'returns'   && !(t.amount < 0))     return false;
+    }
+    return true;
+  });
   const el=id('tableBody');
   if(!tx.length){
     el.innerHTML=`<div class="empty-state"><div class="icon">${allTx.length===0?'📂':'🔍'}</div>${allTx.length===0?'Upload a CSV to get started':'No transactions match'}</div>`;
